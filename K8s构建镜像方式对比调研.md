@@ -4,6 +4,156 @@
 
 在 Kubernetes 集群中构建容器镜像有多种方式，每种方式都有其特点和适用场景。本文档对主流的构建方式进行了详细对比。
 
+## 重要概念说明
+
+### Privileged（特权模式）vs 非特权模式
+
+在 Kubernetes 中，**Privileged（特权模式）**和**非特权模式**是容器安全性的重要概念：
+
+#### 1. Privileged（特权模式）
+
+**定义**: 特权模式允许容器访问主机的所有设备和内核功能，几乎拥有与主机 root 用户相同的权限。
+
+**配置方式**:
+```yaml
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: example
+    securityContext:
+      privileged: true  # 启用特权模式
+```
+
+**特点**:
+- ✅ 可以访问主机的所有设备（如 `/dev`）
+- ✅ 可以修改内核参数
+- ✅ 可以挂载主机文件系统
+- ✅ 可以执行需要特殊权限的操作
+- 🔴 **安全风险高**：容器逃逸后可能影响整个节点
+- 🔴 违反最小权限原则
+
+**使用场景**:
+- Docker-in-Docker (DinD) 需要特权模式来运行 Docker 守护进程
+- 某些系统级工具（如网络工具、存储工具）
+- 开发/测试环境
+
+**示例**:
+```yaml
+# 我们的 Kaniko 构建 Pod 配置
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+      - name: build-image
+        securityContext:
+          privileged: true  # Kaniko 默认需要特权模式
+```
+
+#### 2. 非特权模式（Non-Privileged）
+
+**定义**: 非特权模式是容器的默认模式，容器运行在受限的环境中，只能访问被明确授予的资源。
+
+**配置方式**:
+```yaml
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: example
+    securityContext:
+      privileged: false  # 非特权模式（默认值）
+      # 或者不设置 privileged 字段
+```
+
+**特点**:
+- ✅ **安全性高**：即使容器被攻破，影响范围有限
+- ✅ 符合最小权限原则
+- ✅ 适合生产环境
+- ⚠️ 某些操作可能受限（如访问设备、修改内核参数）
+
+**使用场景**:
+- 生产环境应用
+- 大多数业务容器
+- 安全要求高的场景
+
+**示例**:
+```yaml
+# 普通应用 Pod（非特权模式）
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        securityContext:
+          runAsNonRoot: true  # 以非 root 用户运行
+          allowPrivilegeEscalation: false  # 禁止权限提升
+          # privileged 默认为 false
+```
+
+#### 3. 权限对比表
+
+| 特性 | Privileged（特权模式） | 非特权模式 |
+|------|----------------------|-----------|
+| **访问主机设备** | ✅ 完全访问 | ❌ 受限访问 |
+| **修改内核参数** | ✅ 可以 | ❌ 不可以 |
+| **挂载主机文件系统** | ✅ 可以 | ❌ 受限 |
+| **运行 Docker 守护进程** | ✅ 可以 | ❌ 不可以 |
+| **安全风险** | 🔴 高 | 🟢 低 |
+| **适用环境** | 开发/测试 | 生产环境 |
+| **容器逃逸影响** | 🔴 影响整个节点 | 🟢 影响范围有限 |
+
+#### 4. 在构建镜像场景中的应用
+
+**Kaniko**:
+- **默认**: 需要 `privileged: true`
+- **原因**: 需要访问某些系统功能来构建镜像
+- **改进**: 可以通过特殊配置在非特权模式下运行（需要额外的安全配置）
+
+**Docker-in-Docker**:
+- **必须**: `privileged: true`
+- **原因**: 需要运行 Docker 守护进程，必须访问主机设备
+
+**Buildah**:
+- **支持**: 可以在非特权模式下运行（rootless 模式）
+- **优势**: 安全性更高
+
+**BuildKit**:
+- **支持**: 可以在非特权模式下运行
+- **优势**: 适合生产环境
+
+#### 5. 安全建议
+
+1. **生产环境**: 优先使用非特权模式
+2. **开发环境**: 可以使用特权模式，但要注意安全
+3. **最小权限原则**: 只授予必要的权限
+4. **定期审查**: 检查哪些 Pod 使用了特权模式，评估必要性
+
+#### 6. 实际配置示例
+
+**特权模式示例**（我们的 Kaniko 构建）:
+```yaml
+securityContext:
+  privileged: true  # 需要特权模式
+```
+
+**非特权模式示例**（推荐的生产配置）:
+```yaml
+securityContext:
+  privileged: false  # 非特权模式
+  runAsNonRoot: true  # 以非 root 用户运行
+  allowPrivilegeEscalation: false  # 禁止权限提升
+  capabilities:
+    drop:
+    - ALL  # 删除所有 capabilities
+    add:
+    - NET_BIND_SERVICE  # 只添加必要的 capabilities
+```
+
 ## 构建方式对比表
 
 | 构建方式 | 是否需要 Docker 守护进程 | 权限要求 | 安全性 | 构建速度 | 资源消耗 | 易用性 | 多阶段构建 | 缓存支持 | 适用场景 | 社区支持 |
