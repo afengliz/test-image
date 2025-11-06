@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-kaniko-deployment
+  namespace: ones
+  labels:
+    app: test-kaniko
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-kaniko
+  template:
+    metadata:
+      labels:
+        app: test-kaniko
+    spec:
+      containers:
+      - name: test-kaniko
+        image: localhost:5000/new-image:latest
+        imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+

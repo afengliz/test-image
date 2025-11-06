@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: build-image-deployment
+  namespace: ones
+  labels:
+    app: build-image
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: build-image
+  template:
+    metadata:
+      labels:
+        app: build-image
+    spec:
+      containers:
+      - name: build-image
+        # 使用集群内部的镜像
+        image: registry.cn-hangzhou.aliyuncs.com/kube-image-repo/kaniko:v1.9.1-debug
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            sleep 3600
+        env:
+        - name: REGISTRY
+          value: "registry.kube-system.svc.cluster.local:5000"
+        securityContext:
+          # buildah 需要 privileged 模式
+          privileged: true
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
