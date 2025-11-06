@@ -61,6 +61,7 @@
 
 #### 2.2.2 构建程序
 - **语言**: Go
+- **文件位置**: `build_image/main.go`
 - **功能**: 
   - 动态生成 Dockerfile
   - 准备构建上下文
@@ -76,28 +77,64 @@
 
 ### 3.1 第一步：创建构建 Pod
 
-创建基于 Kaniko 的 Deployment：
+创建基于 Kaniko 的 Deployment，配置文件如下：
 
-```yaml
+```1:40:k8s/build-image-deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: build-image-deployment
   namespace: ones
+  labels:
+    app: build-image
 spec:
   replicas: 1
+  selector:
+    matchLabels:
+      app: build-image
   template:
+    metadata:
+      labels:
+        app: build-image
     spec:
       containers:
       - name: build-image
+        # 使用集群内部的镜像
         image: registry.cn-hangzhou.aliyuncs.com/kube-image-repo/kaniko:v1.9.1-debug
         command: ["/bin/sh"]
-        args: ["-c", "sleep 3600"]
+        args:
+          - -c
+          - |
+            sleep 3600
+        env:
+        - name: REGISTRY
+          value: "registry.kube-system.svc.cluster.local:5000"
         securityContext:
+          # buildah 需要 privileged 模式
           privileged: true
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+```
+
+**执行命令**:
+```bash
+kubectl apply -f k8s/build-image-deployment.yaml
 ```
 
 **执行结果**: ✅ Pod 成功创建并运行
+
+📸 **截图位置**: 执行 `kubectl get pods -n ones -l app=build-image` 查看 Pod 状态
+
+**验证输出示例**:
+```
+NAME                                     READY   STATUS    RESTARTS   AGE
+build-image-deployment-8568486f5d-zdtl5   1/1     Running   0          74m
+```
 
 ### 3.2 第二步：开发构建程序
 
@@ -108,28 +145,96 @@ spec:
 4. 调用 Kaniko executor 构建镜像
 5. 推送镜像到仓库
 
-#### 3.2.2 Dockerfile 模板
-```dockerfile
-FROM registry.kube-system.svc.cluster.local:5000/ones/plugin-host-node:v6.33.1
+#### 3.2.2 构建程序核心代码
+
+完整的构建程序代码：
+
+```10:72:build_image/main.go
+func main() {
+	// 配置参数
+	kanikoExecutor := "/kaniko/executor"
+	dockerfilePath := "/workspace/Dockerfile"
+	contextDir := "/workspace/build-context"
+	mainFilePath := "/workspace/server/main"
+	imageName := "registry.kube-system.svc.cluster.local:5000/new-image:latest"
+	
+	fmt.Println("开始构建镜像...")
+	
+	// 1. 创建构建上下文目录
+	if err := os.MkdirAll(contextDir, 0755); err != nil {
+		fmt.Printf("创建构建上下文目录失败: %v\n", err)
+		os.Exit(1)
+	}
+	
+	// 2. 创建 Dockerfile
+	dockerfileContent := `FROM registry.kube-system.svc.cluster.local:5000/ones/plugin-host-node:v6.33.1
 WORKDIR /usr/local/app
 COPY main /usr/local/app/main
 ENTRYPOINT ["/usr/local/app/main"]
+`
+	if err := os.WriteFile(dockerfilePath, []byte(dockerfileContent), 0644); err != nil {
+		fmt.Printf("创建 Dockerfile 失败: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("✓ Dockerfile 创建成功")
+	
+	// 3. 复制 main 文件到构建上下文
+	contextMainPath := filepath.Join(contextDir, "main")
+	if err := copyFile(mainFilePath, contextMainPath); err != nil {
+		fmt.Printf("复制 main 文件失败: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("✓ main 文件复制成功")
+	
+	// 4. 复制 Dockerfile 到构建上下文
+	contextDockerfilePath := filepath.Join(contextDir, "Dockerfile")
+	if err := copyFile(dockerfilePath, contextDockerfilePath); err != nil {
+		fmt.Printf("复制 Dockerfile 到构建上下文失败: %v\n", err)
+		os.Exit(1)
+	}
+	
+	// 5. 调用 kaniko executor 构建镜像
+	fmt.Printf("调用 kaniko executor 构建镜像: %s\n", imageName)
+	cmd := exec.Command(kanikoExecutor,
+		"--dockerfile", contextDockerfilePath,
+		"--context", contextDir,
+		"--destination", imageName,
+		"--insecure",
+		"--skip-tls-verify",
+	)
+	
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("构建镜像失败: %v\n", err)
+		os.Exit(1)
+	}
+	
+	fmt.Printf("✓ 镜像构建并推送成功: %s\n", imageName)
+}
 ```
 
-#### 3.2.3 关键代码
-```go
-cmd := exec.Command(kanikoExecutor,
-    "--dockerfile", contextDockerfilePath,
-    "--context", contextDir,
-    "--destination", imageName,
-    "--insecure",
-    "--skip-tls-verify",
-)
+**编译命令**:
+```bash
+cd build_image
+GOOS=linux GOARCH=amd64 go build -o build-image main.go
+```
+
+**复制到 Pod**:
+```bash
+kubectl cp build_image/build-image ones/build-image-deployment-8568486f5d-zdtl5:/workspace/build-image
+kubectl cp server/main ones/build-image-deployment-8568486f5d-zdtl5:/workspace/server/main
 ```
 
 **执行结果**: ✅ 程序成功编译并运行
 
 ### 3.3 第三步：构建并推送镜像
+
+**执行命令**:
+```bash
+kubectl exec -n ones build-image-deployment-8568486f5d-zdtl5 -- /workspace/build-image
+```
 
 **构建过程**:
 1. 从集群内部仓库拉取基础镜像
@@ -137,27 +242,84 @@ cmd := exec.Command(kanikoExecutor,
 3. 执行 Kaniko 构建
 4. 推送镜像到仓库
 
+📸 **截图位置**: 执行构建命令时的输出，特别是 Kaniko 的构建日志
+
+**构建输出示例**:
+```
+开始构建镜像...
+✓ Dockerfile 创建成功
+✓ main 文件复制成功
+调用 kaniko executor 构建镜像: registry.kube-system.svc.cluster.local:5000/new-image:latest
+[36mINFO[0m[0000] Retrieving image manifest registry.kube-system.svc.cluster.local:5000/ones/plugin-host-node:v6.33.1 
+[36mINFO[0m[0000] Retrieving image registry.kube-system.svc.cluster.local:5000/ones/plugin-host-node:v6.33.1 from registry registry.kube-system.svc.cluster.local:5000 
+[36mINFO[0m[0000] Built cross stage deps: map[]                
+[36mINFO[0m[0000] Retrieving image manifest registry.kube-system.svc.cluster.local:5000/ones/plugin-host-node:v6.33.1 
+[36mINFO[0m[0000] Returning cached image manifest              
+[36mINFO[0m[0000] Executing 0 build triggers                   
+[36mINFO[0m[0000] Building stage 'registry.kube-system.svc.cluster.local:5000/ones/plugin-host-node:v6.33.1' [idx: '0', base-idx: '-1'] 
+[36mINFO[0m[0000] Unpacking rootfs as cmd COPY main /usr/local/app/main requires it. 
+[36mINFO[0m[0006] WORKDIR /usr/local/app                       
+[36mINFO[0m[0006] Cmd: workdir                                 
+[36mINFO[0m[0006] Changed working directory to /usr/local/app  
+[36mINFO[0m[0006] No files changed in this command, skipping snapshotting. 
+[36mINFO[0m[0006] COPY main /usr/local/app/main                
+[36mINFO[0m[0006] Taking snapshot of files...                  
+[36mINFO[0m[0006] ENTRYPOINT ["/usr/local/app/main"]           
+[36mINFO[0m[0006] Pushing image to registry.kube-system.svc.cluster.local:5000/new-image:latest 
+✓ 镜像构建并推送成功: registry.kube-system.svc.cluster.local:5000/new-image:latest
+[36mINFO[0m[0007] Pushed registry.kube-system.svc.cluster.local:5000/new-image@sha256:178bc4c591681f9b7124ca952418dda0436b1e941f10c0033f7f859068ad44f0 
+```
+
 **执行结果**: ✅ 镜像成功构建并推送
 - 镜像名称: `registry.kube-system.svc.cluster.local:5000/new-image:latest`
 - 镜像 SHA: `sha256:178bc4c591681f9b7124ca952418dda0436b1e941f10c0033f7f859068ad44f0`
 
 ### 3.4 第四步：验证新镜像
 
-创建基于新镜像的 Deployment：
+创建基于新镜像的 Deployment，配置文件如下：
 
-```yaml
+```1:30:k8s/test-kaniko-deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: test-kaniko-deployment
   namespace: ones
+  labels:
+    app: test-kaniko
 spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-kaniko
   template:
+    metadata:
+      labels:
+        app: test-kaniko
     spec:
       containers:
       - name: test-kaniko
         image: localhost:5000/new-image:latest
         imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+```
+
+**执行命令**:
+```bash
+kubectl apply -f k8s/test-kaniko-deployment.yaml
+```
+
+📸 **截图位置**: 执行 `kubectl get pods -n ones -l app=test-kaniko` 查看 Pod 状态
+
+**Pod 状态输出示例**:
+```
+NAME                                     READY   STATUS    RESTARTS   AGE
+test-kaniko-deployment-7654db4fc-l69mv   1/1     Running   0          3m
 ```
 
 **执行结果**: ✅ Pod 成功启动并运行
@@ -174,6 +336,13 @@ spec:
 | 镜像推送 | ✅ | 成功推送到集群内部仓库 |
 
 ### 4.2 运行验证
+
+**查看日志命令**:
+```bash
+kubectl logs -n ones -l app=test-kaniko
+```
+
+📸 **截图位置**: Pod 日志输出，显示 "Hello World"
 
 **Pod 日志输出**:
 ```
@@ -306,10 +475,23 @@ FROM registry.kube-system.svc.cluster.local:5000/ones/plugin-host-node:v6.33.1
 
 ### 10.1 相关文件
 
-- **构建程序**: `test_image/build_image/main.go`
-- **构建 Deployment**: `test_image/k8s/build-image-deployment.yaml`
-- **测试 Deployment**: `test_image/k8s/test-kaniko-deployment.yaml`
-- **测试程序**: `test_image/server/main.go`
+- **构建程序**: [`build_image/main.go`](build_image/main.go)
+- **构建 Deployment**: [`k8s/build-image-deployment.yaml`](k8s/build-image-deployment.yaml)
+- **测试 Deployment**: [`k8s/test-kaniko-deployment.yaml`](k8s/test-kaniko-deployment.yaml)
+- **测试程序**: [`server/main.go`](server/main.go)
+
+**测试程序代码**:
+
+```8:15:server/main.go
+func main() {
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("Hello, World!"))
+	})
+	fmt.Println("Hello World")
+	fmt.Println("Server started on port 8081")
+	http.ListenAndServe(":8081", nil)
+}
+```
 
 ### 10.2 参考命令
 
