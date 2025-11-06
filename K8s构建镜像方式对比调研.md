@@ -156,16 +156,301 @@ securityContext:
 
 ## 构建方式对比表
 
-| 构建方式 | 是否需要 Docker 守护进程 | 权限要求 | 安全性 | 构建速度 | 资源消耗 | 易用性 | 多阶段构建 | 缓存支持 | 适用场景 | 社区支持 |
-|---------|----------------------|---------|--------|---------|---------|--------|-----------|---------|---------|---------|
-| **Kaniko** | ❌ 否 | Privileged 或非特权 | 🟢 高 | 🟡 中等 | 🟢 低 (~100-200MB) | 🟢 简单 | ✅ 支持 | ✅ 支持 | K8s 集群内构建、CI/CD | 🟢 活跃 |
-| **Docker-in-Docker (DinD)** | ✅ 是 | Privileged | 🔴 低 | 🟢 快 | 🔴 高 (~500MB+) | 🟢 简单 | ✅ 支持 | ✅ 支持 | 开发环境、测试 | 🟢 广泛 |
-| **Buildah** | ❌ 否 | Rootless 支持 | 🟢 高 | 🟡 中等 | 🟢 低 (~50-100MB) | 🟡 中等 | ✅ 支持 | ✅ 支持 | 安全要求高的环境 | 🟡 中等 |
-| **BuildKit** | ❌ 否（独立守护进程） | 非特权 | 🟢 高 | 🟢 快 | 🟡 中等 (~200MB) | 🟡 中等 | ✅ 支持 | ✅ 高级缓存 | 生产环境、大规模构建 | 🟢 活跃 |
-| **Tekton** | 取决于底层工具 | 取决于底层工具 | 🟢 高 | 🟡 中等 | 🟡 中等 | 🔴 复杂 | ✅ 支持 | ✅ 支持 | 企业级 CI/CD | 🟢 活跃 |
-| **Skaffold** | 取决于底层工具 | 取决于底层工具 | 🟢 高 | 🟢 快 | 🟡 中等 | 🟢 简单 | ✅ 支持 | ✅ 支持 | 开发迭代、本地构建 | 🟢 活跃 |
-| **Jib** | ❌ 否 | 无特殊要求 | 🟢 高 | 🟢 快 | 🟢 低 | 🟢 简单 | ✅ 支持 | ✅ 增量构建 | Java 应用专用 | 🟢 活跃 |
-| **img** | ❌ 否 | 非特权 | 🟢 高 | 🟡 中等 | 🟢 低 | 🟡 中等 | ✅ 支持 | ✅ 支持 | 轻量级构建 | 🟡 较少 |
+| 构建方式 | 是否需要 Docker 守护进程 | 权限要求 | 安全性 | 构建速度 | 资源消耗 | 易用性 | 多阶段构建 | 缓存支持 | **API 支持** | 适用场景 | 社区支持 |
+|---------|----------------------|---------|--------|---------|---------|--------|-----------|---------|------------|---------|---------|
+| **Kaniko** | ❌ 否 | Privileged 或非特权 | 🟢 高 | 🟡 中等 | 🟢 低 (~100-200MB) | 🟢 简单 | ✅ 支持 | ✅ 支持 | 🟡 通过 K8s API | K8s 集群内构建、CI/CD | 🟢 活跃 |
+| **Docker-in-Docker (DinD)** | ✅ 是 | Privileged | 🔴 低 | 🟢 快 | 🔴 高 (~500MB+) | 🟢 简单 | ✅ 支持 | ✅ 支持 | 🟢 Docker API | 开发环境、测试 | 🟢 广泛 |
+| **Buildah** | ❌ 否 | Rootless 支持 | 🟢 高 | 🟡 中等 | 🟢 低 (~50-100MB) | 🟡 中等 | ✅ 支持 | ✅ 支持 | 🟢 Go API | 安全要求高的环境 | 🟡 中等 |
+| **BuildKit** | ❌ 否（独立守护进程） | 非特权 | 🟢 高 | 🟢 快 | 🟡 中等 (~200MB) | 🟡 中等 | ✅ 支持 | ✅ 高级缓存 | 🟢 gRPC API | 生产环境、大规模构建 | 🟢 活跃 |
+| **Tekton** | 取决于底层工具 | 取决于底层工具 | 🟢 高 | 🟡 中等 | 🟡 中等 | 🔴 复杂 | ✅ 支持 | ✅ 支持 | 🟢 K8s API | 企业级 CI/CD | 🟢 活跃 |
+| **Skaffold** | 取决于底层工具 | 取决于底层工具 | 🟢 高 | 🟢 快 | 🟡 中等 | 🟢 简单 | ✅ 支持 | ✅ 支持 | 🟡 CLI/API | 开发迭代、本地构建 | 🟢 活跃 |
+| **Jib** | ❌ 否 | 无特殊要求 | 🟢 高 | 🟢 快 | 🟢 低 | 🟢 简单 | ✅ 支持 | ✅ 增量构建 | 🟢 Java API | Java 应用专用 | 🟢 活跃 |
+| **img** | ❌ 否 | 非特权 | 🟢 高 | 🟡 中等 | 🟢 低 | 🟡 中等 | ✅ 支持 | ✅ 支持 | 🔴 仅 CLI | 轻量级构建 | 🟡 较少 |
+
+## API vs 命令行方式
+
+### 概述
+
+构建镜像的方式可以分为两类：
+1. **命令行方式**：直接执行命令（如 `docker build`、`kaniko executor`）
+2. **API 方式**：通过编程接口调用（如 Docker SDK、K8s API、Buildah Go API）
+
+### API 方式详细说明
+
+#### 1. Docker SDK/API ⭐⭐⭐⭐⭐
+
+**支持语言**: Go, Python, Java, Node.js 等
+
+**Go 示例**:
+```go
+package main
+
+import (
+    "context"
+    "github.com/docker/docker/api/types"
+    "github.com/docker/docker/client"
+    "github.com/docker/docker/pkg/archive"
+)
+
+func buildImage() error {
+    cli, err := client.NewClientWithOpts(client.FromEnv)
+    if err != nil {
+        return err
+    }
+    defer cli.Close()
+
+    ctx := context.Background()
+    
+    // 创建构建上下文
+    buildContext, err := archive.TarWithOptions(".", &archive.TarOptions{})
+    if err != nil {
+        return err
+    }
+
+    // 构建镜像
+    response, err := cli.ImageBuild(ctx, buildContext, types.ImageBuildOptions{
+        Dockerfile: "Dockerfile",
+        Tags:       []string{"my-image:latest"},
+    })
+    if err != nil {
+        return err
+    }
+    defer response.Body.Close()
+
+    // 读取构建输出
+    // ... 处理响应
+    
+    return nil
+}
+```
+
+**优势**:
+- ✅ 完全编程化，无需命令行
+- ✅ 支持多种语言
+- ✅ 可以实时获取构建进度
+- ✅ 错误处理更灵活
+
+**劣势**:
+- ❌ 需要 Docker 守护进程
+- ❌ 需要网络连接到 Docker daemon
+
+#### 2. Kubernetes API ⭐⭐⭐⭐
+
+**方式**: 通过 K8s API 创建 Pod/Job 来运行构建工具
+
+**Go 示例** (使用 client-go):
+```go
+package main
+
+import (
+    "context"
+    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+    "k8s.io/client-go/kubernetes"
+    "k8s.io/client-go/tools/clientcmd"
+    batchv1 "k8s.io/api/batch/v1"
+    corev1 "k8s.io/api/core/v1"
+)
+
+func buildImageWithKaniko() error {
+    // 创建 K8s 客户端
+    config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+    if err != nil {
+        return err
+    }
+    clientset, err := kubernetes.NewForConfig(config)
+    if err != nil {
+        return err
+    }
+
+    // 创建 Job 来运行 Kaniko
+    job := &batchv1.Job{
+        ObjectMeta: metav1.ObjectMeta{
+            Name: "kaniko-build",
+        },
+        Spec: batchv1.JobSpec{
+            Template: corev1.PodTemplateSpec{
+                Spec: corev1.PodSpec{
+                    Containers: []corev1.Container{
+                        {
+                            Name:  "kaniko",
+                            Image: "gcr.io/kaniko-project/executor:latest",
+                            Args: []string{
+                                "--dockerfile=Dockerfile",
+                                "--context=.",
+                                "--destination=registry.example.com/image:tag",
+                            },
+                        },
+                    },
+                    RestartPolicy: corev1.RestartPolicyNever,
+                },
+            },
+        },
+    }
+
+    // 创建 Job
+    _, err = clientset.BatchV1().Jobs("default").Create(context.TODO(), job, metav1.CreateOptions{})
+    return err
+}
+```
+
+**优势**:
+- ✅ 完全编程化
+- ✅ 可以管理构建任务的生命周期
+- ✅ 支持异步构建
+- ✅ 可以监控构建状态
+
+**劣势**:
+- ⚠️ 需要 K8s 集群访问权限
+- ⚠️ 配置相对复杂
+
+#### 3. Buildah Go API ⭐⭐⭐⭐
+
+**Go 示例**:
+```go
+package main
+
+import (
+    "github.com/containers/buildah"
+    "github.com/containers/storage/pkg/unshare"
+)
+
+func buildImageWithBuildah() error {
+    // 初始化 Buildah
+    store, err := buildah.GetStore(buildah.StoreOptions{})
+    if err != nil {
+        return err
+    }
+    defer store.Shutdown()
+
+    // 创建构建选项
+    options := buildah.BuilderOptions{
+        FromImage: "alpine:latest",
+    }
+
+    // 创建构建器
+    builder, err := buildah.NewBuilder(store, options)
+    if err != nil {
+        return err
+    }
+    defer builder.Delete()
+
+    // 执行构建步骤
+    // ... 添加文件、运行命令等
+
+    // 提交镜像
+    imageID, err := builder.Commit("my-image:latest", buildah.CommitOptions{})
+    return err
+}
+```
+
+**优势**:
+- ✅ 完全编程化
+- ✅ 无需 Docker 守护进程
+- ✅ 支持 rootless 模式
+
+**劣势**:
+- ⚠️ 学习曲线较陡
+- ⚠️ 文档相对较少
+
+#### 4. BuildKit gRPC API ⭐⭐⭐⭐
+
+**方式**: 通过 gRPC 调用 BuildKit
+
+**Go 示例**:
+```go
+package main
+
+import (
+    "github.com/moby/buildkit/client"
+    "github.com/moby/buildkit/session"
+)
+
+func buildImageWithBuildKit() error {
+    // 连接到 BuildKit
+    c, err := client.New(context.Background(), "unix:///run/buildkit/buildkitd.sock")
+    if err != nil {
+        return err
+    }
+    defer c.Close()
+
+    // 创建构建会话
+    sess, err := session.NewSession(context.Background(), "buildkit-client", "")
+    if err != nil {
+        return err
+    }
+
+    // 定义构建步骤
+    // ... 使用 BuildKit 的 LLB (Low-Level Builder) API
+
+    // 执行构建
+    // ...
+    
+    return nil
+}
+```
+
+**优势**:
+- ✅ 高性能
+- ✅ 支持并行构建
+- ✅ 高级缓存机制
+
+**劣势**:
+- ⚠️ API 相对复杂
+- ⚠️ 需要 BuildKit 守护进程
+
+#### 5. Jib Java API ⭐⭐⭐⭐⭐
+
+**Java 示例**:
+```java
+import com.google.cloud.tools.jib.api.Containerizer;
+import com.google.cloud.tools.jib.api.Jib;
+import com.google.cloud.tools.jib.api.RegistryImage;
+
+public class BuildImage {
+    public static void main(String[] args) throws Exception {
+        RegistryImage targetImage = RegistryImage.named("registry.example.com/image:tag");
+        
+        Containerizer containerizer = Containerizer.to(targetImage)
+            .setCredentialRetrievers(...)
+            .build();
+
+        Jib.from("openjdk:11-jre-slim")
+            .addLayer(Paths.get("target/my-app.jar"), "/app")
+            .setEntrypoint("java", "-jar", "/app/my-app.jar")
+            .containerize(containerizer);
+    }
+}
+```
+
+**优势**:
+- ✅ 完全编程化
+- ✅ 无需 Dockerfile
+- ✅ 增量构建
+
+**劣势**:
+- ❌ 仅支持 Java
+
+### API vs 命令行对比
+
+| 特性 | API 方式 | 命令行方式 |
+|------|---------|-----------|
+| **编程化** | ✅ 完全支持 | ❌ 需要执行命令 |
+| **错误处理** | ✅ 结构化错误 | ⚠️ 需要解析输出 |
+| **进度监控** | ✅ 实时回调 | ⚠️ 需要解析日志 |
+| **集成性** | ✅ 易于集成 | ⚠️ 需要进程管理 |
+| **学习成本** | 🔴 较高 | 🟢 较低 |
+| **灵活性** | ✅ 高 | 🟡 中等 |
+
+### 推荐方案
+
+**如果需要在代码中构建镜像**:
+1. **有 Docker 环境**: 使用 **Docker SDK** (Go/Python/Java)
+2. **K8s 集群内**: 使用 **Kubernetes API** + Kaniko/Buildah
+3. **Java 应用**: 使用 **Jib API**
+4. **高性能需求**: 使用 **BuildKit gRPC API**
+
+**如果只是简单构建**:
+- 使用命令行方式更简单直接
 
 ## 详细说明
 
