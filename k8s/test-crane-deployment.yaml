@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-crane-deployment
+  namespace: ones
+  labels:
+    app: test-crane
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-crane
+  template:
+    metadata:
+      labels:
+        app: test-crane
+    spec:
+      containers:
+      - name: test-crane
+        image: localhost:5000/new-crane-image:latest
+        imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+

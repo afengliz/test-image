@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-buildah-deployment
+  namespace: ones
+  labels:
+    app: test-buildah
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-buildah
+  template:
+    metadata:
+      labels:
+        app: test-buildah
+    spec:
+      containers:
+      - name: test-buildah
+        image: localhost:5000/new-buildah-image:latest
+        imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+

@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: buildah-demo-deployment
+  namespace: ones
+  labels:
+    app: buildah-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: buildah-demo
+  template:
+    metadata:
+      labels:
+        app: buildah-demo
+    spec:
+      containers:
+      - name: buildah-demo
+        image: localhost:5000/ones/ones/ones-toolkit:v6.37.0-ones.1
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            sleep 3600
+        env:
+        - name: REGISTRY
+          value: "registry.kube-system.svc.cluster.local:5000"
+        securityContext:
+          privileged: true
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+

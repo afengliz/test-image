@@ -121,6 +121,12 @@ spec:
 **Buildah**:
 - **支持**: 可以在非特权模式下运行（rootless 模式）
 - **优势**: 安全性更高
+- **注意**: 在 K8s 中实际测试发现，即使 rootless 模式仍需要 remount 权限
+
+**Crane**:
+- **支持**: ✅ **完全支持非特权模式**
+- **优势**: 无需特权，轻量级，纯 Go 实现
+- **适用**: 在现有镜像上叠加文件，无需 Dockerfile
 
 **BuildKit**:
 - **支持**: 可以在非特权模式下运行
@@ -161,11 +167,7 @@ securityContext:
 | **Kaniko** | ❌ 否 | Privileged 或非特权 | 🟢 高 | 🟡 中等 | 🟢 低 (~100-200MB) | 🟢 简单 | ✅ 支持 | ✅ 支持 | 🟡 通过 K8s API | K8s 集群内构建、CI/CD | 🟢 活跃 |
 | **Docker-in-Docker (DinD)** | ✅ 是 | Privileged | 🔴 低 | 🟢 快 | 🔴 高 (~500MB+) | 🟢 简单 | ✅ 支持 | ✅ 支持 | 🟢 Docker API | 开发环境、测试 | 🟢 广泛 |
 | **Buildah** | ❌ 否 | Rootless 支持 | 🟢 高 | 🟡 中等 | 🟢 低 (~50-100MB) | 🟡 中等 | ✅ 支持 | ✅ 支持 | 🟢 Go API | 安全要求高的环境 | 🟡 中等 |
-| **BuildKit** | ❌ 否（独立守护进程） | 非特权 | 🟢 高 | 🟢 快 | 🟡 中等 (~200MB) | 🟡 中等 | ✅ 支持 | ✅ 高级缓存 | 🟢 gRPC API | 生产环境、大规模构建 | 🟢 活跃 |
-| **Tekton** | 取决于底层工具 | 取决于底层工具 | 🟢 高 | 🟡 中等 | 🟡 中等 | 🔴 复杂 | ✅ 支持 | ✅ 支持 | 🟢 K8s API | 企业级 CI/CD | 🟢 活跃 |
-| **Skaffold** | 取决于底层工具 | 取决于底层工具 | 🟢 高 | 🟢 快 | 🟡 中等 | 🟢 简单 | ✅ 支持 | ✅ 支持 | 🟡 CLI/API | 开发迭代、本地构建 | 🟢 活跃 |
-| **Jib** | ❌ 否 | 无特殊要求 | 🟢 高 | 🟢 快 | 🟢 低 | 🟢 简单 | ✅ 支持 | ✅ 增量构建 | 🟢 Java API | Java 应用专用 | 🟢 活跃 |
-| **img** | ❌ 否 | 非特权 | 🟢 高 | 🟡 中等 | 🟢 低 | 🟡 中等 | ✅ 支持 | ✅ 支持 | 🔴 仅 CLI | 轻量级构建 | 🟡 较少 |
+| **Crane** | ❌ 否 | **非特权** | 🟢 高 | 🟢 快 | 🟢 低 (~10-20MB) | 🟢 简单 | ❌ 不支持 | ❌ 不支持 | 🟢 Go API | **叠加文件、镜像操作** | 🟢 活跃 |
 
 ## API vs 命令行方式
 
@@ -303,7 +305,63 @@ func buildImageWithKaniko() error {
 - ⚠️ 需要 K8s 集群访问权限
 - ⚠️ 配置相对复杂
 
-#### 3. Buildah Go API ⭐⭐⭐⭐
+#### 3. Crane Go API ⭐⭐⭐⭐⭐
+
+**Go 示例**:
+```go
+package main
+
+import (
+    "github.com/google/go-containerregistry/pkg/crane"
+    "github.com/google/go-containerregistry/pkg/name"
+    "github.com/google/go-containerregistry/pkg/v1/mutate"
+)
+
+func buildImageWithCrane() error {
+    // 拉取基础镜像
+    baseImg, err := crane.Pull("registry.example.com/base:latest")
+    if err != nil {
+        return err
+    }
+    
+    // 追加文件层（从 tarball）
+    newImg, err := crane.Append(baseImg, "files.tar")
+    if err != nil {
+        return err
+    }
+    
+    // 修改镜像配置
+    configFile, err := newImg.ConfigFile()
+    if err != nil {
+        return err
+    }
+    
+    configFile.Config.WorkingDir = "/usr/local/app"
+    configFile.Config.Entrypoint = []string{"/usr/local/app/main"}
+    
+    newImg, err = mutate.ConfigFile(newImg, configFile)
+    if err != nil {
+        return err
+    }
+    
+    // 推送新镜像
+    ref, _ := name.ParseReference("registry.example.com/new-image:latest")
+    return crane.Push(newImg, ref.String())
+}
+```
+
+**优势**:
+- ✅ 完全编程化
+- ✅ **无需特权模式**
+- ✅ 轻量级（纯 Go 实现）
+- ✅ API 简洁易用
+- ✅ 支持镜像操作（拉取、推送、叠加、修改）
+
+**劣势**:
+- ❌ 不支持从 Dockerfile 构建
+- ❌ 不支持执行构建命令
+
+#### 4. Buildah Go API ⭐⭐⭐⭐
 
 **Go 示例**:
 ```go
@@ -440,6 +498,7 @@ public class BuildImage {
 | **集成性** | ✅ 易于集成 | ⚠️ 需要进程管理 |
 | **学习成本** | 🔴 较高 | 🟢 较低 |
 | **灵活性** | ✅ 高 | 🟡 中等 |
+| **权限要求** | 🟢 低（Crane 无需特权） | 🔴 高（Buildah/Kaniko 需要特权） |
 
 ### 推荐方案
 
@@ -448,6 +507,7 @@ public class BuildImage {
 2. **K8s 集群内**: 使用 **Kubernetes API** + Kaniko/Buildah
 3. **Java 应用**: 使用 **Jib API**
 4. **高性能需求**: 使用 **BuildKit gRPC API**
+5. **叠加文件（无需 Dockerfile）**: 使用 **Crane Go API** ⭐ **推荐**（无需特权模式）
 
 **如果只是简单构建**:
 - 使用命令行方式更简单直接
@@ -553,7 +613,117 @@ spec:
 
 ---
 
-### 3. Buildah
+### 3. Crane
+
+**描述**: Google 开发的容器镜像操作工具，基于 go-containerregistry，用于操作容器镜像（拉取、推送、叠加文件、修改配置等）。
+
+**特点**:
+- ✅ 无需 Docker 守护进程
+- ✅ **无需特权模式**（可在非特权容器中运行）
+- ✅ 轻量级（纯 Go 实现）
+- ✅ 支持 Go SDK
+- ✅ 支持镜像叠加文件（append layer）
+- ✅ 支持修改镜像配置（mutate）
+- ❌ 不支持从 Dockerfile 构建镜像
+- ❌ 不支持多阶段构建
+- ❌ 不支持构建缓存
+
+**使用示例**:
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crane-demo
+spec:
+  template:
+    spec:
+      containers:
+      - name: crane-demo
+        image: localhost:5000/ones/ones/ones-toolkit:v6.37.0-ones.1
+        # 无需 privileged: true
+        command: ["/bin/sh", "-c", "sleep 3600"]
+```
+
+**Go SDK 示例**:
+```go
+package main
+
+import (
+    "github.com/google/go-containerregistry/pkg/crane"
+    "github.com/google/go-containerregistry/pkg/name"
+    "github.com/google/go-containerregistry/pkg/v1/mutate"
+)
+
+func main() {
+    // 拉取基础镜像
+    baseImg, _ := crane.Pull("registry.example.com/base:latest")
+    
+    // 追加文件层
+    newImg, _ := crane.Append(baseImg, "files.tar")
+    
+    // 修改配置
+    configFile, _ := newImg.ConfigFile()
+    configFile.Config.WorkingDir = "/usr/local/app"
+    configFile.Config.Entrypoint = []string{"/usr/local/app/main"}
+    newImg, _ = mutate.ConfigFile(newImg, configFile)
+    
+    // 推送新镜像
+    crane.Push(newImg, "registry.example.com/new-image:latest")
+}
+```
+
+**命令行示例**:
+```bash
+# 追加文件层
+crane append \
+  --image=registry.example.com/base:latest \
+  --tarball=files.tar \
+  --tag=registry.example.com/new-image:latest
+
+# 修改配置
+crane mutate \
+  --entrypoint='["/usr/local/app/main"]' \
+  --workdir=/usr/local/app \
+  registry.example.com/new-image:latest
+```
+
+**优势**:
+- ✅ **无需特权模式**：可以在非特权容器中运行
+- ✅ 轻量级：资源消耗极低（~10-20MB）
+- ✅ 安全性高：纯 Go 实现，不依赖容器运行时
+- ✅ Go SDK 完善：易于集成到 Go 程序中
+- ✅ 操作简单：API 清晰易用
+
+**劣势**:
+- ❌ 不支持从 Dockerfile 构建镜像
+- ❌ 不支持多阶段构建
+- ❌ 不支持构建缓存
+- ❌ 只能叠加文件，不能执行构建命令
+
+**适用场景**:
+- ✅ **在现有镜像上叠加文件**（无需 Dockerfile）
+- ✅ **镜像复制和迁移**
+- ✅ **修改镜像配置**（入口点、工作目录、环境变量等）
+- ✅ **非特权环境中的镜像操作**
+- ✅ **轻量级镜像管理工具**
+
+**不适用场景**:
+- ❌ 从 Dockerfile 构建镜像
+- ❌ 需要编译代码的构建流程
+- ❌ 需要执行构建脚本的场景
+
+**与 Buildah/Kaniko 对比**:
+| 特性 | Crane | Buildah | Kaniko |
+|------|-------|---------|--------|
+| **构建镜像** | ❌ 不支持 | ✅ 支持 | ✅ 支持 |
+| **叠加文件** | ✅ 支持 | ✅ 支持 | ✅ 支持 |
+| **权限要求** | 🟢 **无需特权** | 🔴 需要特权 | 🔴 需要特权 |
+| **资源消耗** | 🟢 极低 (~10-20MB) | 🟡 中等 (~50-100MB) | 🟡 中等 (~100-200MB) |
+| **Go SDK** | ✅ 有 | ✅ 有 | ❌ 无 |
+
+---
+
+### 4. Buildah
 
 **描述**: Red Hat 开发的无守护进程容器镜像构建工具。
 
@@ -587,7 +757,7 @@ buildah push registry.example.com/image:tag
 
 ---
 
-### 4. BuildKit
+## 综合对比总结
 
 **描述**: Docker 的新一代构建引擎，支持并行构建和高级缓存。
 

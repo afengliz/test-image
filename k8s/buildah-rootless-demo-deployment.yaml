@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: buildah-rootless-demo-deployment
+  namespace: ones
+  labels:
+    app: buildah-rootless-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: buildah-rootless-demo
+  template:
+    metadata:
+      labels:
+        app: buildah-rootless-demo
+    spec:
+      containers:
+      - name: buildah-rootless-demo
+        image: localhost:5000/ones/ones/ones-toolkit:v6.37.0-ones.1
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            sleep 3600
+        env:
+        - name: REGISTRY
+          value: "registry.kube-system.svc.cluster.local:5000"
+        # Rootless 模式：代码会自动检测用户类型
+        # 如果是 root 用户，直接使用 buildah bud（不使用 unshare）
+        # 如果是非 root 用户，使用 buildah unshare
+        # securityContext:
+        #   runAsNonRoot: true  # 可选：以非 root 用户运行（需要配置 subuid/subgid）
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+

@@ -18,7 +18,7 @@ spec:
       containers:
       - name: build-image
         # 使用集群内部的镜像
-        image: registry.cn-hangzhou.aliyuncs.com/kube-image-repo/kaniko:v1.9.1-debug
+        image:  
         command: ["/bin/sh"]
         args:
           - -c

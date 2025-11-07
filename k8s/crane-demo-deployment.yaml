@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crane-demo-deployment
+  namespace: ones
+  labels:
+    app: crane-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crane-demo
+  template:
+    metadata:
+      labels:
+        app: crane-demo
+    spec:
+      containers:
+      - name: crane-demo
+        image: localhost:5000/ones/ones/ones-toolkit:v6.37.0-ones.1
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            sleep 3600
+        env:
+        - name: REGISTRY
+          value: "registry.kube-system.svc.cluster.local:5000"
+        # Crane 无需特权模式，可以在非特权容器中运行
+        # securityContext:
+        #   privileged: false  # 默认值
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+
