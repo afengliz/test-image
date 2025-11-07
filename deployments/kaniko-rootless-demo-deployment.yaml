@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kaniko-rootless-demo-deployment
+  namespace: ones
+  labels:
+    app: kaniko-rootless-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kaniko-rootless-demo
+  template:
+    metadata:
+      labels:
+        app: kaniko-rootless-demo
+    spec:
+      containers:
+      - name: kaniko-rootless-demo
+        # 使用 Kaniko debug 镜像（包含 shell 工具）
+        image: registry.cn-hangzhou.aliyuncs.com/kube-image-repo/kaniko:v1.9.1-debug
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            sleep 3600
+        env:
+        - name: REGISTRY
+          value: "registry.kube-system.svc.cluster.local:5000"
+        # 非特权模式：不设置 privileged: true
+        # Kaniko 理论上可以在非特权模式下运行
+        securityContext:
+          runAsNonRoot: false  # Kaniko 可能需要 root 用户，但不一定需要 privileged
+          allowPrivilegeEscalation: false  # 禁止权限提升
+          capabilities:
+            drop:
+            - ALL  # 删除所有 capabilities
+            add:
+            - CHOWN
+            - SETUID
+            - SETGID
+            - FOWNER
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+
