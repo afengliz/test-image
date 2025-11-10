@@ -185,7 +185,29 @@ kubectl -n imgbuild delete configmap kaniko-context --ignore-not-found
 
 ## 实际结果（已验证）
 
-- 新镜像已推送：`registry.kube-system.svc.cluster.local:5000/new-kaniko-image:latest`
-- 在镜像中添加文件：`/opt/app/hello.txt`
-- 通过 Pod 实测读取该文件输出 OK（使用镜像 `localhost:5000/new-kaniko-image:latest` 拉取验证）
+- ✅ 新镜像已推送：`registry.kube-system.svc.cluster.local:5000/new-kaniko-image:latest`
+- ✅ 在镜像中添加文件：`/opt/app/hello.txt`
+- ✅ 通过 Pod 实测读取该文件输出 OK（使用镜像 `localhost:5000/new-kaniko-image:latest` 拉取验证）
+- ✅ 测试脚本验证通过（`./test.sh`）
+
+## 代码文件
+
+本目录包含以下文件：
+
+- `kaniko-context.yaml`: 构建上下文 ConfigMap（包含 Dockerfile 和 hello.txt）
+- `kaniko-job.yaml`: Kaniko Job 配置（包含 initContainer 和 executor）
+- `test.sh`: 自动化测试脚本（一键执行完整测试流程）
+- `README.md`: 快速开始指南
+- `kaniko-build.md`: 本文档（详细说明）
+
+## 快速测试
+
+使用自动化脚本一键测试：
+
+```bash
+cd kaniko_rootless_demo
+./test.sh
+```
+
+脚本会自动完成命名空间创建、资源清理、ConfigMap 创建、Job 执行和镜像验证等所有步骤。
 

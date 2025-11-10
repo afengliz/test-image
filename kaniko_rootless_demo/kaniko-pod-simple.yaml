@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kaniko-build-simple
+  namespace: imgbuild
+  labels:
+    app: kaniko-build-simple
+spec:
+  restartPolicy: Never
+  containers:
+    - name: kaniko-build
+      # 使用原始 Kaniko 镜像
+      image: registry.cn-hangzhou.aliyuncs.com/kube-image-repo/kaniko:v1.9.1-debug
+      # 保持容器运行，等待手动触发
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          echo "容器已启动，等待文件复制..."
+          echo "文件复制完成后，请执行: kubectl -n imgbuild exec kaniko-build-simple -- /workspace/main"
+          # 保持容器运行
+          tail -f /dev/null
+      volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+      # 非特权模式配置
+      securityContext:
+        allowPrivilegeEscalation: false
+      env:
+        - name: KANIKO_EXECUTOR
+          value: "/kaniko/executor"
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1000m"
+  volumes:
+    - name: workspace
+      emptyDir: {}
+

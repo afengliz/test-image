@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kaniko-build-test
+  namespace: imgbuild
+  labels:
+    app: kaniko-build-test
+spec:
+  restartPolicy: Never
+  containers:
+    - name: kaniko-build
+      # 使用 registry 中的镜像（main 文件已包含在镜像中）
+      image: localhost:5000/kaniko-build:latest
+      imagePullPolicy: IfNotPresent
+      # 非特权模式配置
+      securityContext:
+        allowPrivilegeEscalation: false
+      env:
+        - name: KANIKO_EXECUTOR
+          value: "/kaniko/executor"
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1000m"

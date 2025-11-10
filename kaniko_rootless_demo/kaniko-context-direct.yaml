@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kaniko-build-context
+  namespace: imgbuild
+  labels:
+    app: kaniko-build-direct
+data:
+  Dockerfile: |
+    FROM registry.kube-system.svc.cluster.local:5000/ones/plugin-host-node:v6.33.1
+    WORKDIR /usr/local/app
+    COPY server/main /usr/local/app/main
+    ENTRYPOINT ["/usr/local/app/main"]
+

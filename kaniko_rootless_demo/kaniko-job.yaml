@@ -1,0 +1,50 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kaniko-addfile
+  namespace: imgbuild
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: kaniko-addfile
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: prepare-context
+          image: localhost:5000/ones/ones/ones-toolkit:v6.37.0-ones.1
+          command: ["/bin/sh","-c"]
+          args:
+            - |
+              set -eux
+              cp -v /cm/Dockerfile /workspace/Dockerfile
+              cp -v /cm/hello.txt /workspace/hello.txt
+          volumeMounts:
+            - name: context
+              mountPath: /workspace
+            - name: cm
+              mountPath: /cm
+      containers:
+        - name: executor
+          image: registry.cn-hangzhou.aliyuncs.com/kube-image-repo/kaniko:v1.9.1-debug
+          args:
+            - --dockerfile=/workspace/Dockerfile
+            - --context=/workspace
+            - --destination=registry.kube-system.svc.cluster.local:5000/new-kaniko-image:latest
+            - --skip-tls-verify
+            - --skip-tls-verify-pull
+            - --verbosity=debug
+          volumeMounts:
+            - name: context
+              mountPath: /workspace
+          securityContext:
+            allowPrivilegeEscalation: false
+      volumes:
+        - name: context
+          emptyDir: {}
+        - name: cm
+          configMap:
+            name: kaniko-context
+

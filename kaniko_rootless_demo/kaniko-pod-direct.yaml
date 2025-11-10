@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kaniko-build-direct
+  namespace: imgbuild
+  labels:
+    app: kaniko-build-direct
+spec:
+  restartPolicy: Never
+  initContainers:
+    - name: prepare-context
+      image: localhost:5000/ones/ones/ones-toolkit:v6.37.0-ones.1
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -eux
+          # 创建构建上下文
+          mkdir -p /workspace/server
+          
+          # 从 ConfigMap 复制文件（如果存在）
+          if [ -f /cm/Dockerfile ]; then
+            cp -v /cm/Dockerfile /workspace/Dockerfile
+          fi
+          
+          if [ -f /cm/main ]; then
+            cp -v /cm/main /workspace/server/main
+            chmod +x /workspace/server/main
+          fi
+          
+          ls -lh /workspace/ /workspace/server/ || true
+      volumeMounts:
+        - name: context
+          mountPath: /workspace
+        - name: cm
+          mountPath: /cm
+  containers:
+    - name: executor
+      # 使用原始 Kaniko 镜像
+      image: registry.cn-hangzhou.aliyuncs.com/kube-image-repo/kaniko:v1.9.1-debug
+      args:
+        - --dockerfile=/workspace/Dockerfile
+        - --context=/workspace
+        - --destination=registry.kube-system.svc.cluster.local:5000/new-kaniko-image:latest
+        - --skip-tls-verify
+        - --skip-tls-verify-pull
+        - --verbosity=info
+      volumeMounts:
+        - name: context
+          mountPath: /workspace
+      securityContext:
+        allowPrivilegeEscalation: false
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1000m"
+  volumes:
+    - name: context
+      emptyDir: {}
+    - name: cm
+      configMap:
+        name: kaniko-build-context
+        optional: true
+

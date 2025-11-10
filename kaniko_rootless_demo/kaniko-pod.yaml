@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kaniko-build
+  namespace: imgbuild
+  labels:
+    app: kaniko-build
+spec:
+  restartPolicy: Never
+  initContainers:
+    - name: prepare-files
+      image: localhost:5000/ones/ones/ones-toolkit:v6.37.0-ones.1
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -eux
+          # 创建目录
+          mkdir -p /workspace/server /kaniko-build
+          
+          # 从挂载的卷复制文件
+          if [ -f /source/main ]; then
+            cp -v /source/main /kaniko-build/main
+            chmod +x /kaniko-build/main
+            echo "✓ 构建程序已复制"
+          else
+            echo "警告: /source/main 不存在"
+          fi
+          
+          if [ -f /source/server-main ]; then
+            cp -v /source/server-main /workspace/server/main
+            chmod +x /workspace/server/main
+            echo "✓ server-main 已复制"
+          else
+            echo "警告: /source/server-main 不存在"
+          fi
+          
+          ls -lh /kaniko-build/ /workspace/server/ || true
+      volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+        - name: kaniko-build
+          mountPath: /kaniko-build
+        - name: source
+          mountPath: /source
+          readOnly: true
+  containers:
+    - name: kaniko-build
+      # 使用原始 Kaniko 镜像
+      image: registry.cn-hangzhou.aliyuncs.com/kube-image-repo/kaniko:v1.9.1-debug
+      # 运行构建程序
+      command: ["/kaniko-build/main"]
+      volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+        - name: kaniko-build
+          mountPath: /kaniko-build
+      # 非特权模式配置
+      securityContext:
+        allowPrivilegeEscalation: false
+      env:
+        - name: KANIKO_EXECUTOR
+          value: "/kaniko/executor"
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1000m"
+  volumes:
+    - name: workspace
+      emptyDir: {}
+    - name: kaniko-build
+      emptyDir: {}
+    - name: source
+      hostPath:
+        path: /Users/afenglizafengliz/go/src/github.com/afengliz/test_image/kaniko_rootless_demo
+        type: Directory

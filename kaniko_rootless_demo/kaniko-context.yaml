@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kaniko-context
+  namespace: imgbuild
+  labels:
+    app: kaniko-addfile
+data:
+  Dockerfile: |
+    FROM registry.kube-system.svc.cluster.local:5000/ones/plugin-host-node:v6.33.1
+    USER root
+    WORKDIR /opt/app
+    COPY hello.txt /opt/app/hello.txt
+  hello.txt: |
+    built-by: kaniko
+    message: hello from kaniko build
+
