@@ -1,0 +1,45 @@
+# 多阶段构建：先编译，再运行
+# Stage 1: 编译阶段
+FROM golang:1.20-alpine AS builder
+
+WORKDIR /build
+
+# 安装必要的 C 库（Buildah 依赖）
+RUN apk add --no-cache \
+    gpgme-dev \
+    libassuan-dev \
+    libgpg-error-dev \
+    pkgconfig \
+    git
+
+# 复制源代码
+COPY go.mod go.sum* ./
+RUN go mod download
+
+COPY main.go ./
+
+# 编译（启用 CGO）
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o main main.go
+
+# Stage 2: 运行阶段
+FROM quay.io/buildah/stable:latest
+
+# 安装 fuse-overlayfs（rootless 模式需要）
+RUN microdnf install -y fuse-overlayfs && microdnf clean all
+
+# 从编译阶段复制二进制文件
+COPY --from=builder /build/main /workspace/main
+
+# 设置工作目录
+WORKDIR /workspace
+
+# 配置 rootless 模式
+RUN mkdir -p /root/.config/containers && \
+    echo '[storage]' > /root/.config/containers/storage.conf && \
+    echo 'driver = "overlay"' >> /root/.config/containers/storage.conf && \
+    echo '[storage.options]' >> /root/.config/containers/storage.conf && \
+    echo 'mount_program = "/usr/bin/fuse-overlayfs"' >> /root/.config/containers/storage.conf
+
+# 默认命令：保持容器运行
+ENTRYPOINT ["/bin/sh", "-c", "tail -f /dev/null"]
+

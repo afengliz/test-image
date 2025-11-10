@@ -1,160 +1,132 @@
-# 在 Go 程序中构建 Docker 镜像
+# Kaniko Privileged 模式构建镜像示例
 
-## 功能说明
+本示例演示如何在 Kubernetes 集群中使用 Kaniko 在**特权模式**下构建并推送容器镜像。
 
-这个程序可以：
-1. ✅ **自动拉取基础镜像**（如 `golang:1.20-alpine`）
-2. ✅ **将 server 文件夹的所有文件复制到镜像的 `/usr/local/app` 目录**
-3. ✅ **设置 `/usr/local/app` 为工作目录（WORKDIR）**
-4. ✅ **动态生成 Dockerfile 并构建镜像**
+## 特性
+
+- ⚠️ **使用 privileged 模式**：容器设置 `privileged: true`
+- ✅ **无需 Docker 守护进程**：使用 Kaniko 直接在用户空间构建
+- ✅ **程序内构建**：在 Go 程序内调用 Kaniko executor
+- ⚠️ **安全性较低**：适合开发/测试环境，不推荐生产环境
+
+> 📖 **想了解 Rootless 与 Privileged 模式的区别？** 查看 [对比文档](../kaniko_rootless_demo/COMPARISON.md)
 
 ## 前置要求
 
-### 方式1: Docker SDK（默认，需要 Docker 守护进程）
-- ✅ **需要 Docker 守护进程运行**
-- 安装依赖：
-  ```bash
-  cd ones-platform-api/test_image/image
-  go mod tidy
-  ```
+- 已配置 `kubectl` 访问 Kubernetes 集群
+- 集群内置私有镜像仓库服务：`registry`（位于 `kube-system` 命名空间）
+  - 推送端点：`registry.kube-system.svc.cluster.local:5000`
+  - 工作负载拉取端点：`localhost:5000`
+- 基础镜像存在：`registry.kube-system.svc.cluster.local:5000/ones/plugin-host-node:v6.33.1`
 
-### 方式2: Buildah（无需 Docker 守护进程）⭐ 推荐
-- ❌ **不需要 Docker 守护进程**
-- ✅ 需要安装 buildah：
-  ```bash
-  brew install buildah  # macOS
-  # 或
-  apt-get install buildah  # Linux
-  ```
+## 快速开始
 
-### 方式3: Kaniko（无需 Docker 守护进程）
-- ❌ **不需要 Docker 守护进程**
-- ⚠️ 需要容器运行时（如 Docker、Podman）来运行 kaniko 容器
+### 1. 构建 Go 程序
 
-## 使用方式
-
-### 1. 安装依赖
 ```bash
-cd ones-platform-api/test_image/image
-go mod tidy
+cd kaniko_privileged_demo
+go mod download
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o build-image main.go
 ```
 
-### 2. 配置参数（在 main.go 中）
-```go
-baseImage := "golang:1.20-alpine"  // 基础镜像
-imageName := "my-app:latest"         // 构建的镜像名称
-serverPath := "../server"            // server 文件夹路径
-```
+### 2. 准备源文件
 
-### 3. 运行程序
-
-#### 使用 Docker SDK（默认，需要 Docker）
+确保 `../demo_server/main` 文件存在：
 ```bash
-go run main.go
-# 或
-BUILD_MODE=docker go run main.go
+ls -lh ../demo_server/main
 ```
 
-#### 使用 Buildah（无需 Docker 守护进程）⭐ 推荐
+### 3. 运行方式
+
+**方式 A：在 Docker 容器内运行**
+
 ```bash
-BUILD_MODE=buildah go run main.go
+# 使用 Kaniko 官方镜像
+docker run --rm \
+  --privileged \
+  -v $(pwd)/../demo_server:/workspace/server:ro \
+  -v $(pwd)/build-image:/workspace/build-image:ro \
+  registry.cn-hangzhou.aliyuncs.com/kube-image-repo/kaniko:v1.9.1-debug \
+  /workspace/build-image
 ```
 
-#### 使用 Kaniko（无需 Docker 守护进程）
+**方式 B：在 K8s Pod 中运行**
+
 ```bash
-BUILD_MODE=kaniko go run main.go
+# 1. 创建 Pod（使用 privileged 模式）
+kubectl apply -f kaniko-pod.yaml
+
+# 2. 等待 Pod 就绪
+kubectl -n imgbuild wait --for=condition=Ready pod/kaniko-privileged --timeout=60s
+
+# 3. 复制文件
+kubectl -n imgbuild cp build-image kaniko-privileged:/workspace/build-image
+kubectl -n imgbuild exec kaniko-privileged -- mkdir -p /workspace/server
+kubectl -n imgbuild cp ../demo_server/main kaniko-privileged:/workspace/server/main
+
+# 4. 运行构建程序
+kubectl -n imgbuild exec kaniko-privileged -- chmod +x /workspace/build-image
+kubectl -n imgbuild exec kaniko-privileged -- /workspace/build-image
 ```
 
-## 工作流程
+**方式 C：使用自动化测试脚本**
 
-1. **拉取基础镜像** - 从 Docker Hub 拉取指定的基础镜像
-2. **生成 Dockerfile** - 动态生成包含以下内容的 Dockerfile：
-   ```dockerfile
-   FROM <基础镜像>
-   WORKDIR /usr/local/app
-   COPY server/ /usr/local/app/
-   WORKDIR /usr/local/app
-   ```
-3. **创建构建上下文** - 将 Dockerfile 和 server 文件夹打包成 tar 文件
-4. **构建镜像** - 使用 Docker SDK 构建镜像
-
-## 生成的镜像结构
-
-```
-镜像内容:
-├── /usr/local/app/          (工作目录)
-│   ├── main.go
-│   ├── go.mod
-│   └── main (如果有编译后的二进制文件)
+```bash
+./test.sh
 ```
 
-## 代码说明
+## 工作原理
 
-- **pullBaseImage**: 拉取基础镜像
-- **generateDockerfile**: 生成 Dockerfile 内容
-- **createBuildContext**: 创建包含 Dockerfile 和 server 文件的构建上下文
-- **buildImageWithServer**: 完整的构建流程（拉取镜像 + 构建）
+1. **创建构建上下文**：在 `/workspace/build-context` 目录准备 Dockerfile 和源文件
+2. **调用 Kaniko executor**：使用 `exec.Command` 调用 `/kaniko/executor`
+3. **构建镜像**：Kaniko 在用户空间构建镜像（即使使用 privileged 模式，Kaniko 仍使用用户空间操作）
+4. **推送镜像**：直接推送到 registry
 
-## 总结
+## 与 Rootless 模式对比
 
-### 在程序里制作镜像是否需要 Docker？
+| 特性 | Privileged 模式 | Rootless 模式 |
+|------|----------------|---------------|
+| **安全配置** | `privileged: true` | `allowPrivilegeEscalation: false` |
+| **安全性** | 🔴 低 | 🟢 高 |
+| **构建功能** | ✅ 完全相同 | ✅ 完全相同 |
+| **性能** | 🟢 相同 | 🟢 相同 |
+| **容器逃逸风险** | 🔴 高 | 🟢 低 |
+| **适用环境** | ⚠️ 开发/测试 | ✅ 生产环境 |
 
-答案：**取决于选择的构建方式**
+**关键结论**：
+- 功能相同：两种模式在构建功能上完全相同
+- 安全性不同：Rootless 模式安全性更高
+- 推荐使用 Rootless 模式：生产环境应优先使用 Rootless 模式
 
-| 构建方式 | 需要 Docker 守护进程？ | 需要安装什么？ |
-|---------|---------------------|--------------|
-| **Docker SDK**（默认） | ✅ **是** | Docker 守护进程 |
-| **Buildah** | ❌ **否** | buildah 工具 |
-| **Kaniko** | ❌ **否** | 容器运行时（用于运行 kaniko 容器） |
+详见：[对比文档](../kaniko_rootless_demo/COMPARISON.md)
 
-### 推荐方案
+## 文件说明
 
-- **有 Docker 环境**：使用默认的 Docker SDK 方式
-- **无 Docker 环境**：使用 **Buildah** 方式（`BUILD_MODE=buildah`）
-  ```bash
-  # 安装 buildah
-  brew install buildah  # macOS
-  
-  # 使用 buildah 构建
-  BUILD_MODE=buildah go run main.go
-  ```
+- `main.go` - 主程序（调用 Kaniko executor）
+- `go.mod` - Go 模块定义
+- `kaniko-pod.yaml` - K8s Pod 配置（privileged 模式）
+- `test.sh` - 自动化测试脚本
+- `Makefile` - 构建和运行脚本
+- `README.md` - 本文档
 
-### 各方式对比
+## 注意事项
 
-| 特性 | Docker SDK | Buildah | Kaniko |
-|-----|-----------|---------|--------|
-| **资源占用** | 🔴 重（需要守护进程） | 🟢 轻（无需守护进程） | 🟡 中（需要容器运行时） |
-| **内存占用** | ~200-500MB（守护进程） | ~50-100MB | ~100-200MB（容器） |
-| **启动速度** | 慢（需要启动守护进程） | 快（直接执行命令） | 中（需要拉取容器镜像） |
-| **依赖** | Docker 守护进程 | buildah 工具 | 容器运行时 + kaniko 镜像 |
-| **权限要求** | 需要 root 或 docker 组 | 支持 rootless | 需要容器运行时权限 |
-| **适用场景** | 开发环境、本地构建 | CI/CD、生产环境 | Kubernetes 集群 |
+1. **安全性警告**：
+   - ⚠️ Privileged 模式安全性较低，存在容器逃逸风险
+   - ⚠️ 不推荐在生产环境使用
+   - ✅ 建议使用 Rootless 模式（参考 `../kaniko_rootless_demo`）
 
-### 轻重程度排名
+2. **权限要求**：
+   - 需要集群允许创建 privileged Pod
+   - 某些集群（如 OpenShift）可能限制 privileged Pod
 
-1. 🟢 **Buildah - 最轻量**
-   - ✅ 无需守护进程
-   - ✅ 资源占用最小（~50-100MB）
-   - ✅ 启动最快
-   - ✅ 支持 rootless 模式
-   - ⚠️ 需要安装 buildah 工具
+3. **功能说明**：
+   - 即使使用 privileged 模式，Kaniko 仍使用用户空间操作
+   - 功能与 Rootless 模式完全相同
+   - 使用 privileged 模式主要是为了兼容性，而非功能需求
 
-2. 🟡 **Kaniko - 中等**
-   - ✅ 无需 Docker 守护进程
-   - ⚠️ 需要容器运行时（Docker/Podman）来运行容器
-   - ⚠️ 需要拉取 kaniko 镜像（~100MB+）
-   - ✅ 适合 Kubernetes 环境
+## 参考文档
 
-3. 🔴 **Docker SDK - 最重**
-   - ❌ 需要 Docker 守护进程（常驻进程）
-   - ❌ 内存占用大（~200-500MB）
-   - ❌ 启动慢（需要先启动守护进程）
-   - ✅ 功能最完整
-   - ✅ 使用最广泛
-
-### 推荐选择
-
-- **追求轻量级**：👉 **Buildah**（`BUILD_MODE=buildah`）
-- **有 Docker 环境**：👉 Docker SDK（默认）
-- **Kubernetes 环境**：👉 Kaniko（`BUILD_MODE=kaniko`）
-
+- [Kaniko 官方文档](https://github.com/GoogleContainerTools/kaniko)
+- [Rootless 模式示例](../kaniko_rootless_demo/README.md)
+- [Rootless vs Privileged 对比](../kaniko_rootless_demo/COMPARISON.md)
